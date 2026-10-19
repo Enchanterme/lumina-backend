@@ -431,6 +431,7 @@ export async function indexLedger(
         // Process contract interface extraction (Issue #263)
         await processContractInterfaceOperation(client, network, ledger.sequence, op);
       }
+    }
 
     if (accountAddresses.length > 0) {
       await client.query(
@@ -1963,7 +1964,7 @@ export async function processSorobanTTLOperation(
 
   // Extract ledger keys from the operation
   const ledgerKeys = (operation.ledger_keys as string[]) ||
-                    (operation.ext as any?.ledgerKeys as string[]) ||
+                    ((operation.ext as any)?.ledgerKeys as string[]) ||
                     [];
 
   const extendTo = (operation.extend_to as string) || (operation.extendTo as string) || String(ledger);
