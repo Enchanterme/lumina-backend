@@ -255,6 +255,23 @@ indexes on `trustlines`: HOT updates went from 0% to 97% and WAL fell by half.
 The measurements, and how the table grows, are in
 [docs/TRUSTLINES_INDEX_REVIEW.md](docs/TRUSTLINES_INDEX_REVIEW.md).
 
+`assets` has API reads as well as indexer writes, so its audit also seeds real
+mainnet and testnet asset populations and runs the API's own `getAssets` and
+`getAssetByKey` against them:
+
+```bash
+npm run audit:assets -- fetch 400       # the same operation cache as audit:trustlines
+npm run audit:assets -- fetch-assets 4  # cache asset populations from Horizon (once)
+npm run audit:assets -- run <label>     # seed, replay, read and EXPLAIN on a scratch database
+npm run audit:assets -- report          # read-only stats; safe on a deployment
+psql $DATABASE_URL -f db/audit/assets.sql       # the same report, without Node
+```
+
+That review dropped four unused indexes and moved `network` to the front of the
+listing index. Replay WAL fell by 17%, and a testnet listing page went from
+1,819 buffers to 65. The measurements and the table's growth are in
+[docs/ASSETS_INDEX_REVIEW.md](docs/ASSETS_INDEX_REVIEW.md).
+
 ## Run with Docker
 
 ```bash

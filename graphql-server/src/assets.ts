@@ -384,8 +384,12 @@ export async function getAssets(pool: Pool, query: AssetsQuery): Promise<AssetPa
         )`;
       } else {
         params.push(value, code, issuer);
-        cursorClause = `AND (
-          a.holder_count < $${params.length - 2}::int 
+        // The leading `<=` is implied by the OR below, but only it can become an
+        // index condition on idx_assets_network_holders: without it a page walks
+        // the index from the top and filters out every row before the cursor.
+        cursorClause = `AND a.holder_count <= $${params.length - 2}::int
+        AND (
+          a.holder_count < $${params.length - 2}::int
           OR (a.holder_count = $${params.length - 2}::int AND (a.asset_code > $${params.length - 1} OR (a.asset_code = $${params.length - 1} AND a.asset_issuer > $${params.length})))
         )`;
       }

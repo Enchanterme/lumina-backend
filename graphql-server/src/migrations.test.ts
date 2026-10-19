@@ -18,7 +18,9 @@ test('loads migrations in order and expands initial schema include', () => {
     '010_retention_prune_indexes', '010_transaction_filters', '010_trustlines',
     '011_assets', '012_asset_volume_buckets', '013_backfill_progress', '013_export_jobs',
     '013_failed_ledgers', '013_trades', '013_trustline_changes', '014_pools_claims_paths_signers',
-    '015_drop_unused_trustline_indexes',
+    '015_admin_operations', '015_asset_issuer_metadata', '015_drop_unused_trustline_indexes',
+    '015_operation_decoding', '015_retry_queue_network_index', '015_transactions_listing_covering_index',
+    '016_assets_index_review',
   ]);
   assert.match(migrations[0].sql, /CREATE TABLE IF NOT EXISTS ledgers/);
   assert.match(migrations[0].sql, /PRIMARY KEY \(id, network\)/);
@@ -45,6 +47,16 @@ test('concurrent migrations are sent one statement at a time', () => {
     'INSERT INTO schema_migrations',
   ]);
   assert.ok(statements.every(s => !s.includes(';')));
+
+  // The assets index review builds its replacement before dropping anything,
+  // so the listing is never left without an index.
+  const assets = loadMigrations().find(m => m.version === '016_assets_index_review');
+  assert.ok(assets);
+  assert.deepEqual(splitStatements(assets.sql).map((s: string) => s.split(/\s+/).slice(0, 3).join(' ')), [
+    'CREATE INDEX CONCURRENTLY',
+    ...Array(5).fill('DROP INDEX CONCURRENTLY'),
+    'INSERT INTO schema_migrations',
+  ]);
 });
 
 test('migration status refuses a later migration when an earlier one is pending', async () => {

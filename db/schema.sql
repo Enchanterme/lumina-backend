@@ -352,20 +352,15 @@ CREATE TABLE IF NOT EXISTS assets (
     CONSTRAINT assets_last_activity_ledger_check CHECK (last_activity_ledger > 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_assets_holder_count
-    ON assets (holder_count DESC, asset_code, asset_issuer);
-
-CREATE INDEX IF NOT EXISTS idx_assets_activity
-    ON assets (last_activity_ledger DESC);
-
-CREATE INDEX IF NOT EXISTS idx_assets_network
-    ON assets (network);
-
-CREATE INDEX IF NOT EXISTS idx_assets_issuer_home_domain
-    ON assets (issuer_home_domain, network);
-
-CREATE INDEX IF NOT EXISTS idx_assets_lookalike
-    ON assets (is_lookalike, network) WHERE is_lookalike = TRUE;
+-- The assets listing: one network, most holders first, keyset-paged on
+-- (holder_count, asset_code, asset_issuer). Point lookups use the primary key.
+-- Every other secondary index this table had was measured unused and dropped in
+-- 016_assets_index_review; see docs/ASSETS_INDEX_REVIEW.md before adding one
+-- back. holder_count is written on the indexer's path, so this index already
+-- keeps those updates from being HOT; another index here must come with the
+-- query that reads it.
+CREATE INDEX IF NOT EXISTS idx_assets_network_holders
+    ON assets (network, holder_count DESC, asset_code, asset_issuer);
 
 -- ─── Asset Volume Buckets (Asset Analytics) ───────────────────────────────────
 

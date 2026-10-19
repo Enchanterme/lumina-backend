@@ -104,6 +104,8 @@ pruning code:
 | `custom_events`              | yes      |                                                              |
 | `contract_storage_entries`   | **no**   | Archived entries are kept as rows with `state = 'archived'` precisely so a client can tell "archived" from "absent" (no row at all). Pruning them collapses that distinction into "gone", which is the one thing the schema was designed to avoid. |
 | `accounts`                   | **no**   | Current state, not a log. Pruning an account row loses the cached balance, flags and thresholds with nothing to rebuild them from. |
+| `trustlines`                 | **no**   | Current state: one row per live (account, asset) pair. A time window would delete trustlines whose last payment happened to be old. See [TRUSTLINES_INDEX_REVIEW.md](TRUSTLINES_INDEX_REVIEW.md#growth). |
+| `assets`                     | **no**   | Current state: one row per asset, with `first_seen_ledger` and an incrementally maintained `holder_count` that cannot be rebuilt from pruned history. Bounded by the number of assets, not by traffic. See [ASSETS_INDEX_REVIEW.md](ASSETS_INDEX_REVIEW.md#growth). |
 | `contract_schemas`           | **no**   | Configuration, not history.                                  |
 | `api_keys`, `exports`        | **no**   | Configuration and operator state.                           |
 | `account_refresh_queue`      | **no**   | A work queue that drains itself. A retention window would only delete pending work. |

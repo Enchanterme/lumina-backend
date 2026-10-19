@@ -27,74 +27,17 @@
  *
  * Reads AUDIT_DATABASE_URL, falling back to DATABASE_URL.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { join } from 'path';
 import { Client, Pool } from 'pg';
-import type { HorizonOperation } from '../../indexer/src/horizon';
 import { processAssetOperation } from '../../indexer/src/db';
+import { fetchOps, loadOps, opsByLedger } from './horizonOps';
 
 const DATABASE_URL = process.env.AUDIT_DATABASE_URL ?? process.env.DATABASE_URL;
-const HORIZON_URL = process.env.AUDIT_HORIZON_URL ?? 'https://horizon.stellar.org';
-const CACHE = process.env.AUDIT_OPS_CACHE ?? join(__dirname, '.cache', 'mainnet-ops.json');
 const NETWORK = 'mainnet';
 
-/** The operation types processAssetOperation acts on; everything else is a no-op. */
-const ASSET_OPS = new Set([
-  'change_trust', 'payment', 'path_payment_strict_send', 'path_payment_strict_receive',
-]);
-
-interface Cache {
-  horizon: string;
-  fromLedger: number;
-  toLedger: number;
-  scanned: number;
-  ops: HorizonOperation[];
-}
-
-async function fetchOps(pages: number): Promise<void> {
-  // Start a fixed distance behind the tip and page forward, so the replay sees
-  // ledgers in the order the indexer does and the cursor never chases the tip.
-  const tip = await (await fetch(`${HORIZON_URL}/ledgers?order=desc&limit=1`)).json() as {
-    _embedded: { records: { sequence: number }[] };
-  };
-  const startLedger = tip._embedded.records[0].sequence - 20_000;
-  let cursor = (BigInt(startLedger) << 32n).toString();
-  const ops: HorizonOperation[] = [];
-  let scanned = 0;
-  let lastLedger = startLedger;
-
-  for (let page = 0; page < pages; page++) {
-    const res = await fetch(`${HORIZON_URL}/operations?order=asc&limit=200&cursor=${cursor}`);
-    if (res.status === 429) {
-      const wait = Number(res.headers.get('retry-after') ?? 10);
-      process.stderr.write(`rate limited, waiting ${wait}s\n`);
-      await new Promise(r => setTimeout(r, wait * 1000));
-      page--;
-      continue;
-    }
-    if (!res.ok) throw new Error(`Horizon ${res.status} on page ${page}`);
-    const body = await res.json() as { _embedded: { records: (HorizonOperation & { paging_token: string })[] } };
-    const records = body._embedded.records;
-    if (records.length === 0) break;
-    for (const op of records) {
-      scanned++;
-      // The paging token's high 32 bits are the ledger sequence.
-      lastLedger = Number(BigInt(op.paging_token) >> 32n);
-      if (ASSET_OPS.has(op.type)) ops.push({ ...op, ledger: lastLedger } as HorizonOperation);
-    }
-    cursor = records[records.length - 1].paging_token;
-    if (page % 25 === 0) process.stderr.write(`page ${page}: ${scanned} scanned, ${ops.length} kept, ledger ${lastLedger}\n`);
-  }
-
-  mkdirSync(join(CACHE, '..'), { recursive: true });
-  const cache: Cache = { horizon: HORIZON_URL, fromLedger: startLedger, toLedger: lastLedger, scanned, ops };
-  writeFileSync(CACHE, JSON.stringify(cache));
-  console.log(`cached ${ops.length} asset operations (of ${scanned}) from ledgers ${startLedger}-${lastLedger} to ${CACHE}`);
-}
-
 async function replay(): Promise<void> {
-  if (!existsSync(CACHE)) throw new Error(`no cached operations at ${CACHE}; run "fetch" first`);
-  const cache = JSON.parse(readFileSync(CACHE, 'utf8')) as Cache;
+  const cache = loadOps();
   const pool = new Pool({ connectionString: DATABASE_URL, max: 1 });
 
   const { rows: [{ n }] } = await pool.query<{ n: string }>('SELECT count(*) AS n FROM trustlines');
@@ -103,13 +46,7 @@ async function replay(): Promise<void> {
   const { rows: [{ lsn: walBefore }] } = await pool.query<{ lsn: string }>('SELECT pg_current_wal_lsn() AS lsn');
 
   // One transaction per ledger, as indexLedger does.
-  const byLedger = new Map<number, HorizonOperation[]>();
-  for (const op of cache.ops) {
-    const ledger = (op as unknown as { ledger: number }).ledger;
-    const list = byLedger.get(ledger) ?? [];
-    list.push(op);
-    byLedger.set(ledger, list);
-  }
+  const byLedger = opsByLedger(cache);
 
   const client = await pool.connect();
   const started = process.hrtime.bigint();
